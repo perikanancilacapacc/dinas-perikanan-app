@@ -506,14 +506,6 @@ export default function App() {
             </div>
           </div>
 
-          {selectedDate < START_DATE_STR && (
-            <div className="bg-amber-50 border border-amber-200 p-3 md:p-4 rounded-xl flex items-start gap-3 mt-4 md:mt-6 shadow-sm w-full">
-              <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={18} />
-              <div className="text-xs md:text-sm text-amber-800 leading-relaxed">
-                Anda memilih tanggal sebelum 1 Oktober 2026. Data pada rentang waktu ini bersifat <strong>arsip statis</strong> dari file Excel.
-              </div>
-            </div>
-          )}
         </div>
       </main>
 

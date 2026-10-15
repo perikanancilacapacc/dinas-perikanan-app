@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { 
-  Globe, CarFront, FileText, UserCircle, Trash2, Edit, ChevronLeft, ChevronRight, CheckCircle2, XCircle, KeyRound, LogOut, ExternalLink, AlertCircle, Upload, CalendarOff, Settings
+  Globe, CarFront, FileText, UserCircle, Trash2, Edit, ChevronLeft, ChevronRight, CheckCircle2, XCircle, KeyRound, LogOut, ExternalLink, AlertCircle, Upload, CalendarOff, Settings, Printer, Download
 } from 'lucide-react';
 import { FaFacebook, FaTwitter, FaInstagram, FaYoutube } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
@@ -17,6 +17,15 @@ const formatYMD = (dateObj) => {
   return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
 };
 
+const formatIndoDate = (dateStr) => {
+  if(!dateStr) return '';
+  try {
+    return parseLocal(dateStr).toLocaleDateString('id-ID', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  } catch (e) {
+    return dateStr;
+  }
+};
+
 export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem('admin_password') || 'admin123');
@@ -31,6 +40,14 @@ export default function App() {
 
   const [showDateModal, setShowDateModal] = useState(false);
   const [modalView, setModalView] = useState('details'); 
+
+  // --- STATE REKAP CETAK & PDF ---
+  const [showRecapModal, setShowRecapModal] = useState(false);
+  const [recapStartDate, setRecapStartDate] = useState(formatYMD(new Date()));
+  const [recapEndDate, setRecapEndDate] = useState(formatYMD(new Date()));
+  const [recapType, setRecapType] = useState('surat'); // 'surat' atau 'booking'
+  const [isPrintingRecap, setIsPrintingRecap] = useState(false);
+  const [recapData, setRecapData] = useState([]);
 
   useEffect(() => { localStorage.setItem('admin_password', adminPassword); }, [adminPassword]);
 
@@ -142,7 +159,6 @@ export default function App() {
     let currentNum = baseStart;
     let validCount = 0;
 
-    // Cari sampai dapat 15 nomor untuk tanggal ini
     while (validCount < 15) {
       const surat = suratsData.find(s => s.nomorGlobal === currentNum);
       if (!surat || surat.tanggal === dateStr) {
@@ -152,7 +168,6 @@ export default function App() {
       currentNum++;
     }
 
-    // Tambahkan surat ekstra yang tanggalnya diubah ke hari ini secara manual oleh Admin
     const extraSurats = suratsData.filter(s => s.tanggal === dateStr && !displayed.includes(s.nomorGlobal));
     extraSurats.forEach(s => displayed.push(s.nomorGlobal));
 
@@ -177,6 +192,73 @@ export default function App() {
 
   const [editingBooking, setEditingBooking] = useState(null);
   const [editingSurat, setEditingSurat] = useState(null);
+
+  // --- FUNGSI GENERATE LAPORAN (PRINT & PDF) ---
+  const handleGenerateReport = (e, mode) => {
+    e.preventDefault();
+    if (recapStartDate > recapEndDate) return alert("Tanggal Mulai tidak boleh lebih dari Tanggal Akhir!");
+    
+    let filtered = [];
+    if (recapType === 'surat') {
+      const activeSurats = surats.filter(s => s.tanggal >= recapStartDate && s.tanggal <= recapEndDate);
+      let archivedSurats = [];
+      Object.keys(excelArchives).forEach(dateStr => {
+        if (dateStr >= recapStartDate && dateStr <= recapEndDate) {
+          const filled = (excelArchives[dateStr] || []).filter(item => item.isFilled).map(item => ({...item, tanggal: dateStr}));
+          archivedSurats = archivedSurats.concat(filled);
+        }
+      });
+      filtered = [...activeSurats, ...archivedSurats].sort((a, b) => {
+        if (a.tanggal === b.tanggal) return a.nomorGlobal - b.nomorGlobal;
+        return a.tanggal > b.tanggal ? 1 : -1;
+      });
+    } else {
+      filtered = bookings.filter(b => b.tglMulai >= recapStartDate && b.tglMulai <= recapEndDate).sort((a, b) => {
+        if (a.tglMulai === b.tglMulai) return a.jamMulai > b.jamMulai ? 1 : -1;
+        return a.tglMulai > b.tglMulai ? 1 : -1;
+      });
+    }
+    
+    if (filtered.length === 0) return alert("Tidak ada data untuk periode tanggal yang dipilih.");
+
+    setRecapData(filtered);
+    setShowRecapModal(false);
+    setIsPrintingRecap(true);
+    
+    // Memberikan waktu React untuk me-render tabel laporan
+    setTimeout(() => {
+      if (mode === 'print') {
+        window.print();
+        setIsPrintingRecap(false);
+      } else if (mode === 'pdf') {
+        const element = document.getElementById('pdf-content-area');
+        
+        // Memuat html2pdf secara dinamis agar tidak membebani load awal aplikasi
+        if (!window.html2pdf) {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          script.onload = () => executePDFDownload(element);
+          document.body.appendChild(script);
+        } else {
+          executePDFDownload(element);
+        }
+      }
+    }, 500);
+  };
+
+  const executePDFDownload = (element) => {
+    const opt = {
+      margin:       10, // Margin PDF 10mm
+      filename:     `Rekap_${recapType === 'surat' ? 'Nomor_Surat' : 'Peminjaman_Aset'}_${recapStartDate}.pdf`,
+      image:        { type: 'jpeg', quality: 1 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' } // A4 Landscape
+    };
+    
+    window.html2pdf().set(opt).from(element).save().then(() => {
+      setIsPrintingRecap(false); // Kembalikan tampilan setelah download selesai
+    });
+  };
 
   const handleBookingSubmit = async (e) => {
     e.preventDefault();
@@ -267,7 +349,6 @@ export default function App() {
       const oldTanggal = editingSurat.originalTanggal;
       const newTanggal = editingSurat.tanggal;
 
-      // 1. JIKA ADMIN TIDAK MENGUBAH TANGGAL (Update Normal)
       if (oldTanggal === newTanggal) {
         if (oldTanggal < START_DATE_STR) {
           const existingArchives = excelArchives[oldTanggal] || [];
@@ -277,9 +358,7 @@ export default function App() {
           await updateDoc(doc(db, "surats", editingSurat.id), { ...editingSurat, nomorLengkap });
         }
       } 
-      // 2. JIKA ADMIN MENGUBAH TANGGAL SURAT (Pemindahan Data)
       else {
-        // A. Hapus dari lokasi tanggal lama
         if (oldTanggal < START_DATE_STR) {
           const oldArchives = excelArchives[oldTanggal] || [];
           const updatedOld = oldArchives.map(arc => arc.nomorGlobal === editingSurat.nomorGlobal ? {
@@ -290,7 +369,6 @@ export default function App() {
           await deleteDoc(doc(db, "surats", editingSurat.id));
         }
 
-        // B. Simpan ke lokasi tanggal baru
         if (newTanggal < START_DATE_STR) {
           const newArchives = excelArchives[newTanggal] || [];
           const existingIdx = newArchives.findIndex(arc => arc.nomorGlobal === editingSurat.nomorGlobal);
@@ -414,6 +492,86 @@ export default function App() {
     };
     reader.readAsBinaryString(file);
   };
+
+  // =========================================
+  // RENDER TAMPILAN CETAK & PDF A4 (Font Tahoma)
+  // =========================================
+  if (isPrintingRecap) {
+    return (
+      <div className="bg-gray-100 min-h-screen w-full flex items-start justify-center p-4">
+        {/* Kontainer area PDF dengan style spesifik Tahoma */}
+        <div id="pdf-content-area" className="bg-white text-black p-8 shadow-2xl w-full max-w-[297mm] min-h-[210mm]" style={{ fontFamily: 'Tahoma, sans-serif' }}>
+          
+          <style>
+            {`
+              @media print {
+                @page { size: A4 landscape; margin: 15mm; }
+                body { background: white; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
+                #pdf-content-area { max-width: none; box-shadow: none; padding: 0; }
+                table { break-inside: auto; }
+                tr { break-inside: avoid; page-break-inside: avoid; }
+              }
+            `}
+          </style>
+
+          <div className="text-center font-bold mb-6 border-b-2 border-black pb-4">
+            <h2 className="text-xl uppercase tracking-wide">REKAPITULASI {recapType === 'surat' ? 'PENGISIAN NOMOR SURAT' : 'PEMINJAMAN ASET / KENDARAAN'}</h2>
+            <h3 className="text-lg mt-1 uppercase tracking-wide">DINAS PERIKANAN KABUPATEN CILACAP</h3>
+            <p className="text-sm mt-2 font-medium">Periode: {formatIndoDate(recapStartDate)} s.d. {formatIndoDate(recapEndDate)}</p>
+          </div>
+          
+          <table className="w-full border-collapse border border-black text-xs md:text-sm text-left">
+            <thead>
+              {recapType === 'surat' ? (
+                <tr className="bg-gray-100">
+                  <th className="border border-black p-2 text-center w-10">No</th>
+                  <th className="border border-black p-2 w-32">Tanggal</th>
+                  <th className="border border-black p-2 w-40">Nomor Surat</th>
+                  <th className="border border-black p-2">Perihal</th>
+                  <th className="border border-black p-2 w-56">Tujuan</th>
+                  <th className="border border-black p-2 w-40">Penanggungjawab</th>
+                </tr>
+              ) : (
+                <tr className="bg-gray-100">
+                  <th className="border border-black p-2 text-center w-10">No</th>
+                  <th className="border border-black p-2 w-48">Fasilitas / Kendaraan</th>
+                  <th className="border border-black p-2">Keperluan</th>
+                  <th className="border border-black p-2 w-64">Waktu Pelaksanaan</th>
+                  <th className="border border-black p-2 w-40">Penanggungjawab</th>
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {recapData.map((item, idx) => (
+                <tr key={idx}>
+                  <td className="border border-black p-2 text-center">{idx + 1}</td>
+                  {recapType === 'surat' ? (
+                    <>
+                      <td className="border border-black p-2">{formatIndoDate(item.tanggal)}</td>
+                      <td className="border border-black p-2 font-semibold">{item.nomorLengkap || `Agenda ${item.nomorGlobal}`}</td>
+                      <td className="border border-black p-2">{item.perihal}</td>
+                      <td className="border border-black p-2">{item.tujuan}</td>
+                      <td className="border border-black p-2">{item.penanggungjawab}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="border border-black p-2 font-semibold">{item.fasilitas}</td>
+                      <td className="border border-black p-2">{item.keperluan}</td>
+                      <td className="border border-black p-2">
+                        Mulai: {formatIndoDate(item.tglMulai)} pkl {item.jamMulai} WIB<br/>
+                        Selesai: {formatIndoDate(item.tglSelesai)} pkl {item.jamSelesai} WIB
+                      </td>
+                      <td className="border border-black p-2">{item.penanggungjawab}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-sky-50 font-sans flex flex-col relative overflow-hidden">
@@ -660,7 +818,6 @@ export default function App() {
                                                   <div className="mt-1.5 flex gap-1">
                                                       <button onClick={() => {
                                                         const docItem = selectedDate < START_DATE_STR ? { ...item, tanggal: selectedDate } : item;
-                                                        // Menyimpan originalTanggal agar sistem tahu jika nomor ini dipindah ke tanggal berbeda
                                                         setEditingSurat({ ...docItem, originalTanggal: docItem.tanggal });
                                                       }} className="bg-blue-100 text-blue-600 px-2 py-1 rounded text-[10px] font-bold">Edit</button>
                                                       <button onClick={() => hapusSurat(item, selectedDate)} className="bg-red-100 text-red-600 px-2 py-1 rounded text-[10px] font-bold">Kosongkan</button>
@@ -787,6 +944,10 @@ export default function App() {
               <button onClick={() => setShowAdminMenu(false)} className="hover:bg-emerald-700 p-1.5 rounded-full"><XCircle size={20}/></button>
             </div>
             <div className="p-4 space-y-3 bg-gray-50">
+              <button onClick={() => { setShowAdminMenu(false); setShowRecapModal(true); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-white border border-teal-100 text-teal-700 shadow-sm hover:shadow-md">
+                <span className="flex items-center gap-3"><Printer size={18} /> Cetak & Download Rekap</span> <ChevronRight size={16}/>
+              </button>
+
               <button onClick={() => { setShowAdminMenu(false); setShowHolidayModal(true); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-white border border-indigo-100 text-indigo-700 shadow-sm hover:shadow-md">
                 <span className="flex items-center gap-3"><CalendarOff size={18} /> Atur Hari Libur</span> <ChevronRight size={16}/>
               </button>
@@ -803,6 +964,46 @@ export default function App() {
               <button onClick={() => { setShowAdminMenu(false); setIsAdmin(false); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-red-600 hover:bg-red-700 text-white shadow-sm mt-4">
                 <span className="flex items-center gap-3"><LogOut size={18} /> Logout Admin</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* MODAL CETAK REKAP LAPORAN (PRINT / PDF)   */}
+      {/* ========================================= */}
+      {showRecapModal && (
+        <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="bg-teal-600 p-4 text-white font-bold text-sm flex justify-between items-center">
+              <span className="flex items-center gap-2"><FileText size={18}/> Form Cetak & PDF Laporan</span>
+              <button onClick={() => setShowRecapModal(false)} className="hover:bg-teal-700 p-1 rounded-full"><XCircle size={18}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Pilih Jenis Laporan</label>
+                <select value={recapType} onChange={e => setRecapType(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 bg-gray-50 text-sm font-medium outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500">
+                  <option value="surat">Nomor Surat Terisi</option>
+                  <option value="booking">Peminjaman Kendaraan / Aset</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Dari Tanggal</label>
+                  <input type="date" required value={recapStartDate} onChange={e => setRecapStartDate(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 bg-gray-50 text-xs md:text-sm outline-none focus:border-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Sampai Tanggal</label>
+                  <input type="date" required value={recapEndDate} onChange={e => setRecapEndDate(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 bg-gray-50 text-xs md:text-sm outline-none focus:border-teal-500" />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 pt-3 border-t border-gray-100">
+                <div className="flex gap-2">
+                  <button type="button" onClick={(e) => handleGenerateReport(e, 'print')} className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-lg text-[11px] md:text-sm flex items-center justify-center gap-1.5 transition-colors"><Printer size={16}/> Cetak (Print)</button>
+                  <button type="button" onClick={(e) => handleGenerateReport(e, 'pdf')} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-lg text-[11px] md:text-sm flex items-center justify-center gap-1.5 transition-colors"><Download size={16}/> Unduh PDF</button>
+                </div>
+                <button type="button" onClick={() => setShowRecapModal(false)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-lg text-sm border border-gray-200 transition-colors">Batal</button>
+              </div>
             </div>
           </div>
         </div>

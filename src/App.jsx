@@ -27,7 +27,8 @@ const formatIndoDate = (dateStr) => {
 };
 
 export default function App() {
-  const [isAdmin, setIsAdmin] = useState(false);
+  // PERBAIKAN: Gunakan sessionStorage agar status login bertahan saat halaman di-refresh
+  const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('is_admin_logged_in') === 'true');
   const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem('admin_password') || 'admin123');
 
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -51,10 +52,17 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('admin_password', adminPassword); }, [adminPassword]);
 
+  // PERBAIKAN: Simpan ke sessionStorage saat berhasil login
   const handleLogin = (e) => {
     e.preventDefault();
-    if (loginInput === adminPassword) { setIsAdmin(true); setShowLoginModal(false); setLoginInput(''); } 
-    else alert("Password salah!");
+    if (loginInput === adminPassword) { 
+      setIsAdmin(true); 
+      sessionStorage.setItem('is_admin_logged_in', 'true');
+      setShowLoginModal(false); 
+      setLoginInput(''); 
+    } else {
+      alert("Password salah!");
+    }
   };
 
   const handleChangePassword = (e) => {
@@ -193,8 +201,10 @@ export default function App() {
   const [editingBooking, setEditingBooking] = useState(null);
   const [editingSurat, setEditingSurat] = useState(null);
 
-  // --- FUNGSI GENERATE LAPORAN (PRINT & PDF) ---
-  const handleGenerateReport = (e, mode) => {
+  // --- PERBAIKAN: FUNGSI GENERATE LAPORAN ---
+  // Kita rubah agar fungsi ini hanya MENAMPILKAN preview data terlebih dahulu.
+  // Eksekusi print dan PDF dilakukan oleh tombol di halaman Preview agar sistem tidak macet.
+  const handleGenerateReportPreview = (e) => {
     e.preventDefault();
     if (recapStartDate > recapEndDate) return alert("Tanggal Mulai tidak boleh lebih dari Tanggal Akhir!");
     
@@ -223,41 +233,7 @@ export default function App() {
 
     setRecapData(filtered);
     setShowRecapModal(false);
-    setIsPrintingRecap(true);
-    
-    // Memberikan waktu React untuk me-render tabel laporan
-    setTimeout(() => {
-      if (mode === 'print') {
-        window.print();
-        setIsPrintingRecap(false);
-      } else if (mode === 'pdf') {
-        const element = document.getElementById('pdf-content-area');
-        
-        // Memuat html2pdf secara dinamis agar tidak membebani load awal aplikasi
-        if (!window.html2pdf) {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-          script.onload = () => executePDFDownload(element);
-          document.body.appendChild(script);
-        } else {
-          executePDFDownload(element);
-        }
-      }
-    }, 500);
-  };
-
-  const executePDFDownload = (element) => {
-    const opt = {
-      margin:       10, // Margin PDF 10mm
-      filename:     `Rekap_${recapType === 'surat' ? 'Nomor_Surat' : 'Peminjaman_Aset'}_${recapStartDate}.pdf`,
-      image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' } // A4 Landscape
-    };
-    
-    window.html2pdf().set(opt).from(element).save().then(() => {
-      setIsPrintingRecap(false); // Kembalikan tampilan setelah download selesai
-    });
+    setIsPrintingRecap(true); // Beralih ke layar preview
   };
 
   const handleBookingSubmit = async (e) => {
@@ -494,20 +470,60 @@ export default function App() {
   };
 
   // =========================================
-  // RENDER TAMPILAN CETAK & PDF A4 (Font Tahoma)
+  // RENDER TAMPILAN PREVIEW, CETAK & PDF
   // =========================================
   if (isPrintingRecap) {
     return (
-      <div className="bg-gray-100 min-h-screen w-full flex items-start justify-center p-4">
-        {/* Kontainer area PDF dengan style spesifik Tahoma */}
-        <div id="pdf-content-area" className="bg-white text-black p-8 shadow-2xl w-full max-w-[297mm] min-h-[210mm]" style={{ fontFamily: 'Tahoma, sans-serif' }}>
+      <div className="bg-gray-200 min-h-screen w-full flex flex-col items-center pb-10">
+        
+        {/* NAVIGASI TOP BAR (Disediakan khusus agar tidak error/terjebak) */}
+        <div className="w-full bg-cyan-950 p-4 flex flex-col md:flex-row justify-between items-center shadow-md print:hidden sticky top-0 z-50 gap-4">
+          <div className="text-white font-bold flex items-center gap-2">
+            <FileText size={20} /> Preview Rekap Laporan
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button onClick={() => window.print()} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm">
+              <Printer size={16}/> Print Laporan
+            </button>
+            <button 
+              onClick={() => {
+                const element = document.getElementById('pdf-content-area');
+                if (typeof window.html2pdf === 'undefined') {
+                  alert("Library PDF sedang dimuat. Mohon klik OK dan tunggu 2 detik, lalu klik Download PDF lagi.");
+                  const script = document.createElement('script');
+                  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                  document.head.appendChild(script);
+                } else {
+                  const opt = {
+                    margin: 10,
+                    filename: `Rekap_${recapType === 'surat' ? 'Nomor_Surat' : 'Peminjaman_Aset'}_${recapStartDate}.pdf`,
+                    image: { type: 'jpeg', quality: 1 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+                  };
+                  window.html2pdf().set(opt).from(element).save();
+                }
+              }} 
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm"
+            >
+              <Download size={16}/> Download PDF
+            </button>
+            <button onClick={() => setIsPrintingRecap(false)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm">
+              <XCircle size={16}/> Kembali
+            </button>
+          </div>
+        </div>
+
+        {/* AREA KERTAS DOKUMEN (A4 Landscape, Font Tahoma) */}
+        <div id="pdf-content-area" className="bg-white text-black p-8 shadow-2xl w-full max-w-[297mm] min-h-[210mm] mt-6 relative" style={{ fontFamily: 'Tahoma, sans-serif' }}>
           
+          {/* CSS khusus saat di-print fisik */}
           <style>
             {`
               @media print {
                 @page { size: A4 landscape; margin: 15mm; }
                 body { background: white; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
-                #pdf-content-area { max-width: none; box-shadow: none; padding: 0; }
+                #pdf-content-area { max-width: none; box-shadow: none; padding: 0; margin: 0; }
                 table { break-inside: auto; }
                 tr { break-inside: avoid; page-break-inside: avoid; }
               }
@@ -867,7 +883,7 @@ export default function App() {
                         <label className="block text-xs md:text-sm font-semibold text-cyan-800 mb-1">Waktu Selesai <span className="text-red-500">*</span></label>
                         <div className="flex gap-2">
                           <input required type="date" value={formBooking.tglSelesai} onChange={(e) => setFormBooking({...formBooking, tglSelesai: e.target.value})} className="w-3/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
-                          <input required type="time" value={formBooking.jamSelesai} onChange={(e) => setFormBooking({...formBooking, jamSelesai: e.target.value})} className="w-2/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
+                          <input required type="time" value={formBooking.jamSelesai} onChange={(e) => setFormBooking({...formBooking, jamMulai: e.target.value})} className="w-2/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
                         </div>
                       </div>
                     </div>
@@ -945,7 +961,7 @@ export default function App() {
             </div>
             <div className="p-4 space-y-3 bg-gray-50">
               <button onClick={() => { setShowAdminMenu(false); setShowRecapModal(true); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-white border border-teal-100 text-teal-700 shadow-sm hover:shadow-md">
-                <span className="flex items-center gap-3"><Printer size={18} /> Cetak & Download Rekap</span> <ChevronRight size={16}/>
+                <span className="flex items-center gap-3"><FileText size={18} /> Cetak & Download Rekap</span> <ChevronRight size={16}/>
               </button>
 
               <button onClick={() => { setShowAdminMenu(false); setShowHolidayModal(true); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-white border border-indigo-100 text-indigo-700 shadow-sm hover:shadow-md">
@@ -961,7 +977,12 @@ export default function App() {
                 <span className="flex items-center gap-3"><KeyRound size={18} /> Ganti Password</span> <ChevronRight size={16}/>
               </button>
               
-              <button onClick={() => { setShowAdminMenu(false); setIsAdmin(false); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-red-600 hover:bg-red-700 text-white shadow-sm mt-4">
+              {/* PERBAIKAN LOGOUT: Hapus data dari sessionStorage saat logout */}
+              <button onClick={() => { 
+                setShowAdminMenu(false); 
+                setIsAdmin(false); 
+                sessionStorage.removeItem('is_admin_logged_in'); 
+              }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-red-600 hover:bg-red-700 text-white shadow-sm mt-4">
                 <span className="flex items-center gap-3"><LogOut size={18} /> Logout Admin</span>
               </button>
             </div>
@@ -970,18 +991,18 @@ export default function App() {
       )}
 
       {/* ========================================= */}
-      {/* MODAL CETAK REKAP LAPORAN (PRINT / PDF)   */}
+      {/* MODAL CETAK REKAP LAPORAN                 */}
       {/* ========================================= */}
       {showRecapModal && (
         <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div className="bg-teal-600 p-4 text-white font-bold text-sm flex justify-between items-center">
-              <span className="flex items-center gap-2"><FileText size={18}/> Form Cetak & PDF Laporan</span>
+              <span className="flex items-center gap-2"><FileText size={18}/> Pilih Tanggal Laporan</span>
               <button onClick={() => setShowRecapModal(false)} className="hover:bg-teal-700 p-1 rounded-full"><XCircle size={18}/></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Pilih Jenis Laporan</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Jenis Laporan</label>
                 <select value={recapType} onChange={e => setRecapType(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 bg-gray-50 text-sm font-medium outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500">
                   <option value="surat">Nomor Surat Terisi</option>
                   <option value="booking">Peminjaman Kendaraan / Aset</option>
@@ -998,11 +1019,12 @@ export default function App() {
                 </div>
               </div>
               <div className="flex flex-col gap-2 pt-3 border-t border-gray-100">
-                <div className="flex gap-2">
-                  <button type="button" onClick={(e) => handleGenerateReport(e, 'print')} className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-lg text-[11px] md:text-sm flex items-center justify-center gap-1.5 transition-colors"><Printer size={16}/> Cetak (Print)</button>
-                  <button type="button" onClick={(e) => handleGenerateReport(e, 'pdf')} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-lg text-[11px] md:text-sm flex items-center justify-center gap-1.5 transition-colors"><Download size={16}/> Unduh PDF</button>
-                </div>
-                <button type="button" onClick={() => setShowRecapModal(false)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-lg text-sm border border-gray-200 transition-colors">Batal</button>
+                <button type="button" onClick={handleGenerateReportPreview} className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-lg text-[13px] md:text-sm flex items-center justify-center gap-2 transition-colors">
+                   Tampilkan Preview Laporan
+                </button>
+                <button type="button" onClick={() => setShowRecapModal(false)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-lg text-sm border border-gray-200 transition-colors">
+                   Batal
+                </button>
               </div>
             </div>
           </div>
@@ -1090,7 +1112,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal Hari Libur & Login */}
+      {/* Modal Hari Libur */}
       {showHolidayModal && (
         <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -1124,6 +1146,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Modal Login Admin */}
       {showLoginModal && (
         <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -1142,6 +1165,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Modal Ganti Password */}
       {showChangePwdModal && (
         <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">

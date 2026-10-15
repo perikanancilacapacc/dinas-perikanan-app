@@ -27,7 +27,6 @@ const formatIndoDate = (dateStr) => {
 };
 
 export default function App() {
-  // PERBAIKAN: Gunakan sessionStorage agar status login bertahan saat halaman di-refresh
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('is_admin_logged_in') === 'true');
   const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem('admin_password') || 'admin123');
 
@@ -46,13 +45,12 @@ export default function App() {
   const [showRecapModal, setShowRecapModal] = useState(false);
   const [recapStartDate, setRecapStartDate] = useState(formatYMD(new Date()));
   const [recapEndDate, setRecapEndDate] = useState(formatYMD(new Date()));
-  const [recapType, setRecapType] = useState('surat'); // 'surat' atau 'booking'
+  const [recapType, setRecapType] = useState('surat'); 
   const [isPrintingRecap, setIsPrintingRecap] = useState(false);
   const [recapData, setRecapData] = useState([]);
 
   useEffect(() => { localStorage.setItem('admin_password', adminPassword); }, [adminPassword]);
 
-  // PERBAIKAN: Simpan ke sessionStorage saat berhasil login
   const handleLogin = (e) => {
     e.preventDefault();
     if (loginInput === adminPassword) { 
@@ -201,9 +199,7 @@ export default function App() {
   const [editingBooking, setEditingBooking] = useState(null);
   const [editingSurat, setEditingSurat] = useState(null);
 
-  // --- PERBAIKAN: FUNGSI GENERATE LAPORAN ---
-  // Kita rubah agar fungsi ini hanya MENAMPILKAN preview data terlebih dahulu.
-  // Eksekusi print dan PDF dilakukan oleh tombol di halaman Preview agar sistem tidak macet.
+  // --- PERBAIKAN: Fungsi Generate Laporan Preview ---
   const handleGenerateReportPreview = (e) => {
     e.preventDefault();
     if (recapStartDate > recapEndDate) return alert("Tanggal Mulai tidak boleh lebih dari Tanggal Akhir!");
@@ -233,7 +229,46 @@ export default function App() {
 
     setRecapData(filtered);
     setShowRecapModal(false);
-    setIsPrintingRecap(true); // Beralih ke layar preview
+    setIsPrintingRecap(true); 
+  };
+
+  // --- PERBAIKAN: Fungsi Download PDF Otomatis ---
+  const handleDownloadPDF = () => {
+    const element = document.getElementById('pdf-content-area');
+    if (!element) return;
+
+    // Tambahkan style indikator loading agar user tahu proses sedang berjalan
+    element.style.opacity = '0.7'; 
+    
+    const executePDF = () => {
+      const opt = {
+        margin: 10,
+        filename: `Rekap_${recapType === 'surat' ? 'Nomor_Surat' : 'Peminjaman_Aset'}_${recapStartDate}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+      };
+      
+      window.html2pdf().set(opt).from(element).save().then(() => {
+        element.style.opacity = '1'; // Kembalikan style setelah selesai
+      }).catch(err => {
+        alert("Gagal memproses PDF: " + err.message);
+        element.style.opacity = '1';
+      });
+    };
+
+    if (typeof window.html2pdf === 'undefined') {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.onload = () => executePDF();
+      script.onerror = () => {
+        alert("Gagal memuat library PDF. Pastikan perangkat terhubung internet.");
+        element.style.opacity = '1';
+      };
+      document.head.appendChild(script);
+    } else {
+      executePDF();
+    }
   };
 
   const handleBookingSubmit = async (e) => {
@@ -469,14 +504,14 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  // =========================================
+// =========================================
   // RENDER TAMPILAN PREVIEW, CETAK & PDF
   // =========================================
   if (isPrintingRecap) {
     return (
       <div className="bg-gray-200 min-h-screen w-full flex flex-col items-center pb-10">
         
-        {/* NAVIGASI TOP BAR (Disediakan khusus agar tidak error/terjebak) */}
+        {/* NAVIGASI TOP BAR */}
         <div className="w-full bg-cyan-950 p-4 flex flex-col md:flex-row justify-between items-center shadow-md print:hidden sticky top-0 z-50 gap-4">
           <div className="text-white font-bold flex items-center gap-2">
             <FileText size={20} /> Preview Rekap Laporan
@@ -485,27 +520,7 @@ export default function App() {
             <button onClick={() => window.print()} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm">
               <Printer size={16}/> Print Laporan
             </button>
-            <button 
-              onClick={() => {
-                const element = document.getElementById('pdf-content-area');
-                if (typeof window.html2pdf === 'undefined') {
-                  alert("Library PDF sedang dimuat. Mohon klik OK dan tunggu 2 detik, lalu klik Download PDF lagi.");
-                  const script = document.createElement('script');
-                  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-                  document.head.appendChild(script);
-                } else {
-                  const opt = {
-                    margin: 10,
-                    filename: `Rekap_${recapType === 'surat' ? 'Nomor_Surat' : 'Peminjaman_Aset'}_${recapStartDate}.pdf`,
-                    image: { type: 'jpeg', quality: 1 },
-                    html2canvas: { scale: 2, useCORS: true },
-                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-                  };
-                  window.html2pdf().set(opt).from(element).save();
-                }
-              }} 
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm"
-            >
+            <button onClick={handleDownloadPDF} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm">
               <Download size={16}/> Download PDF
             </button>
             <button onClick={() => setIsPrintingRecap(false)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center gap-2 transition-colors shadow-sm">
@@ -515,69 +530,73 @@ export default function App() {
         </div>
 
         {/* AREA KERTAS DOKUMEN (A4 Landscape, Font Tahoma) */}
-        <div id="pdf-content-area" className="bg-white text-black p-8 shadow-2xl w-full max-w-[297mm] min-h-[210mm] mt-6 relative" style={{ fontFamily: 'Tahoma, sans-serif' }}>
+        <div id="pdf-content-area" style={{ backgroundColor: '#ffffff', color: '#000000', padding: '32px', width: '100%', maxWidth: '297mm', minHeight: '210mm', marginTop: '24px', position: 'relative', fontFamily: 'Tahoma, sans-serif' }}>
           
-          {/* CSS khusus saat di-print fisik */}
           <style>
             {`
               @media print {
                 @page { size: A4 landscape; margin: 15mm; }
-                body { background: white; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
-                #pdf-content-area { max-width: none; box-shadow: none; padding: 0; margin: 0; }
+                body { background: #ffffff; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
+                #pdf-content-area { max-width: none !important; padding: 0 !important; margin: 0 !important; }
                 table { break-inside: auto; }
                 tr { break-inside: avoid; page-break-inside: avoid; }
               }
             `}
           </style>
 
-          <div className="text-center font-bold mb-6 border-b-2 border-black pb-4">
-            <h2 className="text-xl uppercase tracking-wide">REKAPITULASI {recapType === 'surat' ? 'PENGISIAN NOMOR SURAT' : 'PEMINJAMAN ASET / KENDARAAN'}</h2>
-            <h3 className="text-lg mt-1 uppercase tracking-wide">DINAS PERIKANAN KABUPATEN CILACAP</h3>
-            <p className="text-sm mt-2 font-medium">Periode: {formatIndoDate(recapStartDate)} s.d. {formatIndoDate(recapEndDate)}</p>
+          <div style={{ textAlign: 'center', fontWeight: 'bold', marginBottom: '24px', borderBottom: '2px solid #000000', paddingBottom: '16px' }}>
+            <h2 style={{ fontSize: '20px', textTransform: 'uppercase', letterSpacing: '0.025em', margin: 0 }}>REKAPITULASI {recapType === 'surat' ? 'PENGISIAN NOMOR SURAT' : 'PEMINJAMAN ASET / KENDARAAN'}</h2>
+            <h3 style={{ fontSize: '18px', textTransform: 'uppercase', letterSpacing: '0.025em', margin: '4px 0 0 0' }}>DINAS PERIKANAN KABUPATEN CILACAP</h3>
+            <p style={{ fontSize: '14px', fontWeight: '500', margin: '8px 0 0 0' }}>Periode: {formatIndoDate(recapStartDate)} s.d. {formatIndoDate(recapEndDate)}</p>
           </div>
           
-          <table className="w-full border-collapse border border-black text-xs md:text-sm text-left">
+          <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #000000', fontSize: '13px', textAlign: 'left' }}>
             <thead>
               {recapType === 'surat' ? (
-                <tr className="bg-gray-100">
-                  <th className="border border-black p-2 text-center w-10">No</th>
-                  <th className="border border-black p-2 w-32">Tanggal</th>
-                  <th className="border border-black p-2 w-40">Nomor Surat</th>
-                  <th className="border border-black p-2">Perihal</th>
-                  <th className="border border-black p-2 w-56">Tujuan</th>
-                  <th className="border border-black p-2 w-40">Penanggungjawab</th>
+                <tr style={{ backgroundColor: '#f3f4f6' }}>
+                  <th style={{ border: '1px solid #000000', padding: '8px', textAlign: 'center', width: '35px' }}>No</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '110px' }}>Tanggal</th>
+                  {/* Lebar Nomor Surat dan Tujuan diperkecil, Perihal tidak diberi width agar otomatis melebar */}
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '125px' }}>Nomor Surat</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px' }}>Perihal</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '160px' }}>Tujuan</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '130px' }}>Penanggungjawab</th>
                 </tr>
               ) : (
-                <tr className="bg-gray-100">
-                  <th className="border border-black p-2 text-center w-10">No</th>
-                  <th className="border border-black p-2 w-48">Fasilitas / Kendaraan</th>
-                  <th className="border border-black p-2">Keperluan</th>
-                  <th className="border border-black p-2 w-64">Waktu Pelaksanaan</th>
-                  <th className="border border-black p-2 w-40">Penanggungjawab</th>
+                <tr style={{ backgroundColor: '#f3f4f6' }}>
+                  <th style={{ border: '1px solid #000000', padding: '8px', textAlign: 'center', width: '40px' }}>No</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '192px' }}>Fasilitas / Kendaraan</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px' }}>Keperluan</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '256px' }}>Waktu Pelaksanaan</th>
+                  <th style={{ border: '1px solid #000000', padding: '8px', width: '160px' }}>Penanggungjawab</th>
                 </tr>
               )}
             </thead>
             <tbody>
               {recapData.map((item, idx) => (
                 <tr key={idx}>
-                  <td className="border border-black p-2 text-center">{idx + 1}</td>
+                  <td style={{ border: '1px solid #000000', padding: '8px', textAlign: 'center' }}>{idx + 1}</td>
                   {recapType === 'surat' ? (
                     <>
-                      <td className="border border-black p-2">{formatIndoDate(item.tanggal)}</td>
-                      <td className="border border-black p-2 font-semibold">{item.nomorLengkap || `Agenda ${item.nomorGlobal}`}</td>
-                      <td className="border border-black p-2">{item.perihal}</td>
-                      <td className="border border-black p-2">{item.tujuan}</td>
-                      <td className="border border-black p-2">{item.penanggungjawab}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>
+                        {/* Memisahkan Hari dan Tanggal dengan line break (<br/>) */}
+                        {formatIndoDate(item.tanggal).split(', ')[0]},<br/>
+                        {formatIndoDate(item.tanggal).split(', ')[1]}
+                      </td>
+                      <td style={{ border: '1px solid #000000', padding: '8px', fontWeight: '600' }}>{item.nomorLengkap || `Agenda ${item.nomorGlobal}`}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>{item.perihal}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>{item.tujuan}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>{item.penanggungjawab}</td>
                     </>
                   ) : (
                     <>
-                      <td className="border border-black p-2 font-semibold">{item.fasilitas}</td>
-                      <td className="border border-black p-2">{item.keperluan}</td>
-                      <td className="border border-black p-2">
+                      <td style={{ border: '1px solid #000000', padding: '8px', fontWeight: '600' }}>{item.fasilitas}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>{item.keperluan}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>
                         Mulai: {formatIndoDate(item.tglMulai)} pkl {item.jamMulai} WIB<br/>
                         Selesai: {formatIndoDate(item.tglSelesai)} pkl {item.jamSelesai} WIB
                       </td>
-                      <td className="border border-black p-2">{item.penanggungjawab}</td>
+                      <td style={{ border: '1px solid #000000', padding: '8px' }}>{item.penanggungjawab}</td>
                     </>
                   )}
                 </tr>
@@ -977,7 +996,6 @@ export default function App() {
                 <span className="flex items-center gap-3"><KeyRound size={18} /> Ganti Password</span> <ChevronRight size={16}/>
               </button>
               
-              {/* PERBAIKAN LOGOUT: Hapus data dari sessionStorage saat logout */}
               <button onClick={() => { 
                 setShowAdminMenu(false); 
                 setIsAdmin(false); 
@@ -991,7 +1009,7 @@ export default function App() {
       )}
 
       {/* ========================================= */}
-      {/* MODAL CETAK REKAP LAPORAN                 */}
+      {/* MODAL CETAK REKAP LAPORAN (PRINT / PDF)   */}
       {/* ========================================= */}
       {showRecapModal && (
         <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">

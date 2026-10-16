@@ -902,7 +902,8 @@ export default function App() {
                         <label className="block text-xs md:text-sm font-semibold text-cyan-800 mb-1">Waktu Selesai <span className="text-red-500">*</span></label>
                         <div className="flex gap-2">
                           <input required type="date" value={formBooking.tglSelesai} onChange={(e) => setFormBooking({...formBooking, tglSelesai: e.target.value})} className="w-3/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
-                          <input required type="time" value={formBooking.jamSelesai} onChange={(e) => setFormBooking({...formBooking, jamMulai: e.target.value})} className="w-2/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
+                          {/* PERBAIKAN: Sebelumnya tertulis jamMulai, sekarang diubah menjadi jamSelesai */}
+                          <input required type="time" value={formBooking.jamSelesai} onChange={(e) => setFormBooking({...formBooking, jamSelesai: e.target.value})} className="w-2/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
                         </div>
                       </div>
                     </div>

@@ -5,9 +5,10 @@ import {
 import { FaFacebook, FaTwitter, FaInstagram, FaYoutube } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
 
-// IMPORT FIREBASE
-import { db } from './firebase';
+// IMPORT FIREBASE DATABASE & AUTHENTICATION
+import { db, auth } from './firebase';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 
 const parseLocal = (ymd) => {
   const [y, m, d] = ymd.split('-');
@@ -27,17 +28,15 @@ const formatIndoDate = (dateStr) => {
 };
 
 export default function App() {
-  const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('is_admin_logged_in') === 'true');
-  const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem('admin_password') || 'admin123');
-
+  // STATE AUTENTIKASI SERVER (FIREBASE)
+  const [isAdmin, setIsAdmin] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loginInput, setLoginInput] = useState('');
+  
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   
   const [showAdminMenu, setShowAdminMenu] = useState(false);
-  const [showChangePwdModal, setShowChangePwdModal] = useState(false);
-  const [oldPwdInput, setOldPwdInput] = useState('');
-  const [newPwdInput, setNewPwdInput] = useState('');
-
   const [showDateModal, setShowDateModal] = useState(false);
   const [modalView, setModalView] = useState('details'); 
 
@@ -49,25 +48,44 @@ export default function App() {
   const [isPrintingRecap, setIsPrintingRecap] = useState(false);
   const [recapData, setRecapData] = useState([]);
 
-  useEffect(() => { localStorage.setItem('admin_password', adminPassword); }, [adminPassword]);
+  // MEMANTAU STATUS LOGIN DARI SERVER FIREBASE
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+      }
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const handleLogin = (e) => {
+  // FUNGSI LOGIN KE FIREBASE AUTH
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (loginInput === adminPassword) { 
-      setIsAdmin(true); 
-      sessionStorage.setItem('is_admin_logged_in', 'true');
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
       setShowLoginModal(false); 
-      setLoginInput(''); 
-    } else {
-      alert("Password salah!");
+      setLoginEmail('');
+      setLoginPassword('');
+      alert("Login berhasil!");
+    } catch (error) {
+      alert("Gagal login! Pastikan Email dan Password benar.\n(Error: " + error.message + ")");
     }
   };
 
-  const handleChangePassword = (e) => {
-    e.preventDefault();
-    if (oldPwdInput !== adminPassword) return alert("Password lama salah!");
-    if (!newPwdInput || newPwdInput.length < 4) return alert("Password baru minimal 4 karakter!");
-    setAdminPassword(newPwdInput); setShowChangePwdModal(false); setOldPwdInput(''); setNewPwdInput(''); alert("Password berhasil diubah!");
+  // FUNGSI LOGOUT DARI FIREBASE AUTH
+  const handleLogout = async () => {
+    if(confirm("Anda yakin ingin logout?")) {
+      try {
+        await signOut(auth);
+        setShowAdminMenu(false);
+        alert("Berhasil Logout.");
+      } catch (error) {
+        alert("Gagal logout: " + error.message);
+      }
+    }
   };
 
   const [bookings, setBookings] = useState([]);
@@ -134,7 +152,7 @@ export default function App() {
       setHolidayDateInput('');
       setHolidayDescInput('');
     } catch (error) {
-      alert("Gagal menyimpan hari libur: " + error.message);
+      alert("Gagal menyimpan hari libur. Pastikan Anda login sebagai Admin! Error: " + error.message);
     }
   };
 
@@ -160,18 +178,26 @@ export default function App() {
     }
 
     const baseStart = START_GLOBAL_NUMBER + (countWorkingDays * 15);
+    const todayStr = formatYMD(new Date());
     
     let displayed = [];
-    let currentNum = baseStart;
-    let validCount = 0;
 
-    while (validCount < 15) {
+    for (let i = 0; i < 15; i++) {
+      const currentNum = baseStart + i;
       const surat = suratsData.find(s => s.nomorGlobal === currentNum);
-      if (!surat || surat.tanggal === dateStr) {
-        validCount++;
+      
+      if (!surat) {
         displayed.push(currentNum);
+      } else if (surat.tanggal === dateStr) {
+        displayed.push(currentNum);
+      } else {
+        if (dateStr < todayStr) {
+          // Hari lampau: Slot tetap terkunci
+        } else {
+          // Hari ini / masa depan: Slot bertambah otomatis
+          displayed.push(currentNum);
+        }
       }
-      currentNum++;
     }
 
     const extraSurats = suratsData.filter(s => s.tanggal === dateStr && !displayed.includes(s.nomorGlobal));
@@ -199,7 +225,6 @@ export default function App() {
   const [editingBooking, setEditingBooking] = useState(null);
   const [editingSurat, setEditingSurat] = useState(null);
 
-  // --- PERBAIKAN: Fungsi Generate Laporan Preview ---
   const handleGenerateReportPreview = (e) => {
     e.preventDefault();
     if (recapStartDate > recapEndDate) return alert("Tanggal Mulai tidak boleh lebih dari Tanggal Akhir!");
@@ -232,12 +257,9 @@ export default function App() {
     setIsPrintingRecap(true); 
   };
 
-  // --- PERBAIKAN: Fungsi Download PDF Otomatis ---
   const handleDownloadPDF = () => {
     const element = document.getElementById('pdf-content-area');
     if (!element) return;
-
-    // Tambahkan style indikator loading agar user tahu proses sedang berjalan
     element.style.opacity = '0.7'; 
     
     const executePDF = () => {
@@ -250,7 +272,7 @@ export default function App() {
       };
       
       window.html2pdf().set(opt).from(element).save().then(() => {
-        element.style.opacity = '1'; // Kembalikan style setelah selesai
+        element.style.opacity = '1';
       }).catch(err => {
         alert("Gagal memproses PDF: " + err.message);
         element.style.opacity = '1';
@@ -268,6 +290,46 @@ export default function App() {
       document.head.appendChild(script);
     } else {
       executePDF();
+    }
+  };
+
+  const handleCekNomorGanda = () => {
+    const semuaNomor = [];
+    
+    surats.forEach(s => {
+      semuaNomor.push({ nomor: s.nomorGlobal, tanggal: s.tanggal, sumber: 'Data Baru' });
+    });
+
+    Object.values(excelArchives).forEach(himpunan => {
+      himpunan.forEach(item => {
+        if (item.isFilled) semuaNomor.push({ nomor: item.nomorGlobal, tanggal: item.tanggal, sumber: 'Arsip' });
+      });
+    });
+
+    const hitung = {};
+    const duplikat = [];
+
+    semuaNomor.forEach(item => {
+      if (!hitung[item.nomor]) hitung[item.nomor] = [];
+      hitung[item.nomor].push(item);
+    });
+
+    Object.keys(hitung).forEach(nomor => {
+      if (hitung[nomor].length > 1) duplikat.push({ nomor, data: hitung[nomor] });
+    });
+
+    if (duplikat.length === 0) {
+      alert("Aman! Sistem tidak menemukan nomor agenda yang ganda di dalam database.");
+    } else {
+      let pesan = `DITEMUKAN ${duplikat.length} NOMOR GANDA:\n\n`;
+      duplikat.forEach(d => {
+        pesan += `⚠️ Agenda No. ${d.nomor} terisi ${d.data.length} kali di:\n`;
+        d.data.forEach(x => {
+          pesan += `   - Tgl: ${x.tanggal} (${x.sumber})\n`;
+        });
+        pesan += "\n";
+      });
+      alert(pesan + "Silakan edit dan kosongkan salah satu nomor di tanggal yang salah melalui kalender.");
     }
   };
 
@@ -349,7 +411,7 @@ export default function App() {
       setEditingBooking(null);
       alert("Data peminjaman berhasil diperbarui!");
     } catch (error) {
-      alert("Gagal memperbarui peminjaman: " + error.message);
+      alert("Gagal memperbarui peminjaman: Akses Ditolak (Harus login Admin). " + error.message);
     }
   };
 
@@ -398,14 +460,14 @@ export default function App() {
       setEditingSurat(null);
       alert(`Data surat berhasil diperbarui!${oldTanggal !== newTanggal ? `\n(Nomor agenda ${editingSurat.nomorGlobal} telah dipindahkan dari ${oldTanggal} ke ${newTanggal})` : ''}`);
     } catch (error) {
-      alert("Gagal memperbarui surat: " + error.message);
+      alert("Gagal memperbarui surat: Akses Ditolak (Harus login Admin). " + error.message);
     }
   };
 
   const hapusBooking = async (id) => { 
     if (confirm("Hapus data ini?")) {
       try { await deleteDoc(doc(db, "bookings", id)); } 
-      catch (error) { alert("Gagal menghapus: " + error.message); }
+      catch (error) { alert("Gagal menghapus: Akses Ditolak. " + error.message); }
     }
   };
   
@@ -422,7 +484,7 @@ export default function App() {
           await deleteDoc(doc(db, "surats", item.id));
         }
       } catch (error) {
-        alert("Gagal menghapus: " + error.message);
+        alert("Gagal mengosongkan: Akses Ditolak. " + error.message);
       }
     } 
   };
@@ -498,20 +560,18 @@ export default function App() {
         alert("File Excel arsip berhasil diunggah dan disinkronkan ke Database!");
       } catch (err) {
         console.error(err);
-        alert("Gagal membaca file atau sinkronisasi Excel: " + err.message);
+        alert("Gagal membaca file atau sinkronisasi Excel: Akses Ditolak / Gagal. " + err.message);
       }
     };
     reader.readAsBinaryString(file);
   };
 
-// =========================================
-  // RENDER TAMPILAN PREVIEW, CETAK & PDF
+  // =========================================
+  // RENDER TAMPILAN PREVIEW, CETAK & PDF (A4 Landscape, Tahoma)
   // =========================================
   if (isPrintingRecap) {
     return (
       <div className="bg-gray-200 min-h-screen w-full flex flex-col items-center pb-10">
-        
-        {/* NAVIGASI TOP BAR */}
         <div className="w-full bg-cyan-950 p-4 flex flex-col md:flex-row justify-between items-center shadow-md print:hidden sticky top-0 z-50 gap-4">
           <div className="text-white font-bold flex items-center gap-2">
             <FileText size={20} /> Preview Rekap Laporan
@@ -529,9 +589,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* AREA KERTAS DOKUMEN (A4 Landscape, Font Tahoma) */}
         <div id="pdf-content-area" style={{ backgroundColor: '#ffffff', color: '#000000', padding: '32px', width: '100%', maxWidth: '297mm', minHeight: '210mm', marginTop: '24px', position: 'relative', fontFamily: 'Tahoma, sans-serif' }}>
-          
           <style>
             {`
               @media print {
@@ -556,7 +614,6 @@ export default function App() {
                 <tr style={{ backgroundColor: '#f3f4f6' }}>
                   <th style={{ border: '1px solid #000000', padding: '8px', textAlign: 'center', width: '35px' }}>No</th>
                   <th style={{ border: '1px solid #000000', padding: '8px', width: '110px' }}>Tanggal</th>
-                  {/* Lebar Nomor Surat dan Tujuan diperkecil, Perihal tidak diberi width agar otomatis melebar */}
                   <th style={{ border: '1px solid #000000', padding: '8px', width: '125px' }}>Nomor Surat</th>
                   <th style={{ border: '1px solid #000000', padding: '8px' }}>Perihal</th>
                   <th style={{ border: '1px solid #000000', padding: '8px', width: '160px' }}>Tujuan</th>
@@ -579,7 +636,6 @@ export default function App() {
                   {recapType === 'surat' ? (
                     <>
                       <td style={{ border: '1px solid #000000', padding: '8px' }}>
-                        {/* Memisahkan Hari dan Tanggal dengan line break (<br/>) */}
                         {formatIndoDate(item.tanggal).split(', ')[0]},<br/>
                         {formatIndoDate(item.tanggal).split(', ')[1]}
                       </td>
@@ -606,6 +662,10 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (isAuthLoading) {
+    return <div className="min-h-screen bg-sky-50 flex items-center justify-center font-bold text-cyan-800">Memuat Sistem Keamanan...</div>;
   }
 
   return (
@@ -902,7 +962,6 @@ export default function App() {
                         <label className="block text-xs md:text-sm font-semibold text-cyan-800 mb-1">Waktu Selesai <span className="text-red-500">*</span></label>
                         <div className="flex gap-2">
                           <input required type="date" value={formBooking.tglSelesai} onChange={(e) => setFormBooking({...formBooking, tglSelesai: e.target.value})} className="w-3/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
-                          {/* PERBAIKAN: Sebelumnya tertulis jamMulai, sekarang diubah menjadi jamSelesai */}
                           <input required type="time" value={formBooking.jamSelesai} onChange={(e) => setFormBooking({...formBooking, jamSelesai: e.target.value})} className="w-2/5 border border-cyan-200 rounded-lg p-2 md:p-2.5 bg-sky-50 focus:outline-none text-xs md:text-sm" />
                         </div>
                       </div>
@@ -993,15 +1052,11 @@ export default function App() {
                 <input type="file" accept=".xlsx, .xls" onChange={(e) => { setShowAdminMenu(false); handleFileUpload(e); }} className="hidden" />
               </label>
 
-              <button onClick={() => { setShowAdminMenu(false); setShowChangePwdModal(true); }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-white border border-amber-100 text-amber-700 shadow-sm hover:shadow-md">
-                <span className="flex items-center gap-3"><KeyRound size={18} /> Ganti Password</span> <ChevronRight size={16}/>
+              <button onClick={handleCekNomorGanda} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-white border border-rose-100 text-rose-700 shadow-sm hover:shadow-md cursor-pointer">
+                <span className="flex items-center gap-3"><AlertCircle size={18} /> Lacak Nomor Ganda</span> <ChevronRight size={16}/>
               </button>
               
-              <button onClick={() => { 
-                setShowAdminMenu(false); 
-                setIsAdmin(false); 
-                sessionStorage.removeItem('is_admin_logged_in'); 
-              }} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-red-600 hover:bg-red-700 text-white shadow-sm mt-4">
+              <button onClick={handleLogout} className="w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold transition-colors bg-red-600 hover:bg-red-700 text-white shadow-sm mt-4">
                 <span className="flex items-center gap-3"><LogOut size={18} /> Logout Admin</span>
               </button>
             </div>
@@ -1010,7 +1065,7 @@ export default function App() {
       )}
 
       {/* ========================================= */}
-      {/* MODAL CETAK REKAP LAPORAN (PRINT / PDF)   */}
+      {/* MODAL CETAK REKAP LAPORAN                 */}
       {/* ========================================= */}
       {showRecapModal && (
         <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -1172,35 +1227,16 @@ export default function App() {
             <div className="bg-cyan-900 p-4 text-white text-center font-bold">Login Administrator</div>
             <form onSubmit={handleLogin} className="p-5 md:p-6 space-y-4">
               <div>
+                <label className="block text-sm font-semibold text-cyan-800 mb-1">Email Admin</label>
+                <input type="email" autoFocus required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} className="w-full border border-cyan-200 rounded-lg p-2.5 bg-sky-50 text-sm" placeholder="Masukkan email..." />
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-cyan-800 mb-1">Password</label>
-                <input type="password" autoFocus required value={loginInput} onChange={e => setLoginInput(e.target.value)} className="w-full border border-cyan-200 rounded-lg p-2.5 bg-sky-50 text-sm" placeholder="Masukkan password..." />
+                <input type="password" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full border border-cyan-200 rounded-lg p-2.5 bg-sky-50 text-sm" placeholder="Masukkan password..." />
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowLoginModal(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-lg text-sm">Batal</button>
-                <button type="submit" className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2.5 rounded-lg text-sm">Login</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Ganti Password */}
-      {showChangePwdModal && (
-        <div className="fixed inset-0 bg-cyan-950/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
-            <div className="bg-amber-600 p-4 text-white text-center font-bold text-sm">Ganti Password Admin</div>
-            <form onSubmit={handleChangePassword} className="p-5 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Password Lama</label>
-                <input type="password" required autoFocus value={oldPwdInput} onChange={e => setOldPwdInput(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 bg-gray-50 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Password Baru</label>
-                <input type="password" required minLength={4} value={newPwdInput} onChange={e => setNewPwdInput(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 bg-gray-50 text-sm" />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowChangePwdModal(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-lg text-sm">Batal</button>
-                <button type="submit" className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-lg text-sm">Simpan</button>
+                <button type="submit" className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2.5 rounded-lg text-sm">Login Firebase</button>
               </div>
             </form>
           </div>

@@ -1,6 +1,7 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth"; // TAMBAHKAN BARIS INI
 
 // Ganti konfigurasi di bawah dengan milik Anda dari Firebase Console
 const firebaseConfig = {
@@ -17,3 +18,4 @@ const app = initializeApp(firebaseConfig);
 
 // Inisialisasi layanan Firestore Database
 export const db = getFirestore(app);
+export const auth = getAuth(app);
